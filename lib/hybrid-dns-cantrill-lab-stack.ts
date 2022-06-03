@@ -1,4 +1,4 @@
-import { Stack, StackProps, Tags } from 'aws-cdk-lib';
+import { Duration, Stack, StackProps, Tags } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as route53 from 'aws-cdk-lib/aws-route53';
@@ -257,7 +257,6 @@ chkconfig named on
     );
 
     this.setupAwsSide();
-    this.setupRoute53();
   }
 
   private createServer(
@@ -330,13 +329,6 @@ chkconfig named on
     ec2Policy.attachToRole(ec2Role);
 
     return ec2Role;
-  }
-
-  private setupRoute53() {
-    const hostedZone = new route53.HostedZone(this, 'awsHostedZone', {
-      zoneName: 'aws.animals4life.org',
-      vpcs: [this.awsVpc]
-    });
   }
 
   private setupAwsSide() {
@@ -450,6 +442,19 @@ chkconfig named on
       awsSsmEc2MessagesInterfaceEndpoint,
       awsSsmMessagesInterfaceEndpoint
     );
+
+    const hostedZone = new route53.HostedZone(this, 'awsHostedZone', {
+      zoneName: 'aws.animals4life.org',
+      vpcs: [this.awsVpc]
+    });
+
+    const recordSet = new route53.RecordSet(this, 'RecordSet', {
+      recordType: route53.RecordType.A,
+      zone: hostedZone,
+      recordName: 'web.aws.animals4life.org',
+      ttl: Duration.minutes(60),
+      target: route53.RecordTarget.fromIpAddresses(awsInstanceA.instancePrivateIp, awsInstanceB.instancePrivateIp)
+    });
   }
 
   private createSG(name: string): ec2.SecurityGroup {
