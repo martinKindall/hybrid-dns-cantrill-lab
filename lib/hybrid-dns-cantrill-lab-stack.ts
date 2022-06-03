@@ -5,6 +5,10 @@ import { Construct } from 'constructs';
 
 export class HybridDnsCantrillLabStack extends Stack {
   private onPremVpc: ec2.Vpc;
+  private priv1Subnet: ec2.ISubnet;
+  private priv2Subnet: ec2.ISubnet;
+  private onPremSecurityGroup: ec2.SecurityGroup;
+  private privRT: ec2.CfnRouteTable;
 
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
@@ -33,54 +37,54 @@ export class HybridDnsCantrillLabStack extends Stack {
       tags: [{key: 'Name', value: 'sn-onprem-B'}]
     });
 
-    const privRT = new ec2.CfnRouteTable(this, 'privRT', {
+    this.privRT = new ec2.CfnRouteTable(this, 'privRT', {
       vpcId: this.onPremVpc.vpcId,
       tags: [{key: 'Name', value: 'A4L-ONPREM-RT'}]
     });
 
-    const priv1SubnetImported = ec2.Subnet.fromSubnetAttributes(this, 'priv1SubnetImported', {
+    this.priv1Subnet = ec2.Subnet.fromSubnetAttributes(this, 'priv1Subnet', {
       subnetId: priv1Subnet.attrSubnetId,
-      routeTableId: privRT.attrRouteTableId,
+      routeTableId: this.privRT.attrRouteTableId,
       availabilityZone: priv1SubnetAZ
     });
 
-    const priv2SubnetImported = ec2.Subnet.fromSubnetAttributes(this, 'priv2SubnetImported', {
+    this.priv2Subnet = ec2.Subnet.fromSubnetAttributes(this, 'this.priv2Subnet', {
       subnetId: priv2Subnet.attrSubnetId,
-      routeTableId: privRT.attrRouteTableId,
+      routeTableId: this.privRT.attrRouteTableId,
       availabilityZone: priv2SubnetAZ
     });
 
     const rtToPriv1Association = new ec2.CfnSubnetRouteTableAssociation(this, 'rtToPriv1Association', {
       subnetId: priv1Subnet.attrSubnetId,
-      routeTableId: privRT.attrRouteTableId
+      routeTableId: this.privRT.attrRouteTableId
     });
 
     const rtToPriv2Association = new ec2.CfnSubnetRouteTableAssociation(this, 'rtToPriv2Association', {
       subnetId: priv2Subnet.attrSubnetId,
-      routeTableId: privRT.attrRouteTableId
+      routeTableId: this.privRT.attrRouteTableId
     });
 
-    const onPremSecurityGroup = new ec2.SecurityGroup(this, 'SecurityGroup', {
+    this.onPremSecurityGroup = new ec2.SecurityGroup(this, 'SecurityGroup', {
       vpc: this.onPremVpc,
       description: 'Default ONPREM SG'
     });
 
-    onPremSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(22), 'Allow SSH IPv4 IN');
-    onPremSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP IPv4 IN');
-    onPremSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), new ec2.Port({
+    this.onPremSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(22), 'Allow SSH IPv4 IN');
+    this.onPremSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP IPv4 IN');
+    this.onPremSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), new ec2.Port({
       protocol: ec2.Protocol.ALL,
       stringRepresentation: 'Allow DNS IN',
       fromPort: 53,
       toPort: 53,
     }), 'Allow DNS IN');
-    onPremSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.allIcmp(), 'Allow ICMP IN');
+    this.onPremSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.allIcmp(), 'Allow ICMP IN');
 
     const securityGroupIngress = new ec2.CfnSecurityGroupIngress(this, 'OnPremSecurityGroupIngress', {
-      groupId: onPremSecurityGroup.securityGroupId,
+      groupId: this.onPremSecurityGroup.securityGroupId,
       ipProtocol: 'tcp',
       fromPort: 0,
       toPort: 65535,
-      sourceSecurityGroupId: onPremSecurityGroup.securityGroupId,
+      sourceSecurityGroupId: this.onPremSecurityGroup.securityGroupId,
       description: 'Self reference rule for On Prem Security Group'
     });
 
@@ -89,16 +93,16 @@ export class HybridDnsCantrillLabStack extends Stack {
     const onPremInstanceApp = this.createServer(
       this.onPremVpc,
       'onPremInstanceApp',
-      priv2SubnetImported,
-      onPremSecurityGroup,
+      this.priv2Subnet,
+      this.onPremSecurityGroup,
       ec2Role,
       'A4L-ONPREM-APP');
 
     const onPremInstanceB = this.createServer(
       this.onPremVpc,
       'onPremInstanceB',
-      priv2SubnetImported,
-      onPremSecurityGroup,
+      this.priv2Subnet,
+      this.onPremSecurityGroup,
       ec2Role,
       'A4L-ONPREM-DNSB',
 `#!/bin/bash -xe
@@ -156,8 +160,8 @@ chkconfig named on`
     const onPremInstanceA = this.createServer(
       this.onPremVpc,
       'onPremInstanceA',
-      priv1SubnetImported,
-      onPremSecurityGroup,
+      this.priv1Subnet,
+      this.onPremSecurityGroup,
       ec2Role,
       'A4L-ONPREM-DNSA',
 `#!/bin/bash -xe
@@ -285,5 +289,43 @@ chkconfig named on
     ec2Policy.attachToRole(ec2Role);
 
     return ec2Role;
+  }
+
+  private vpcEndpoints() {
+    const ssmInterfaceEndpoint = new ec2.InterfaceVpcEndpoint(this, 'ssmEndpoint', {
+      vpc: this.onPremVpc,
+      service: ec2.InterfaceVpcEndpointAwsService.SSM,
+      privateDnsEnabled: true,
+      subnets: {
+        subnets: [this.priv1Subnet, this.priv2Subnet]
+      },
+      securityGroups: [this.onPremSecurityGroup]
+    });
+
+    const ssmEc2MessagesInterfaceEndpoint = new ec2.InterfaceVpcEndpoint(this, 'ssmEc2MessagesEndpoint', {
+      vpc: this.onPremVpc,
+      service: ec2.InterfaceVpcEndpointAwsService.EC2_MESSAGES,
+      privateDnsEnabled: true,
+      subnets: {
+        subnets: [this.priv1Subnet, this.priv2Subnet]
+      },
+      securityGroups: [this.onPremSecurityGroup]
+    });
+
+    const ssmMessagesInterfaceEndpoint = new ec2.InterfaceVpcEndpoint(this, 'ssmMessagesEndpoint', {
+      vpc: this.onPremVpc,
+      service: ec2.InterfaceVpcEndpointAwsService.SSM_MESSAGES,
+      privateDnsEnabled: true,
+      subnets: {
+        subnets: [this.priv1Subnet, this.priv2Subnet]
+      },
+      securityGroups: [this.onPremSecurityGroup]
+    });
+
+    const s3InterfaceEndpoint = new ec2.CfnVPCEndpoint(this, 's3Endpoint', {
+      vpcId: this.onPremVpc.vpcId,
+      serviceName: `com.amazonaws.${this.region}.s3`,
+      routeTableIds: [this.privRT.attrRouteTableId]
+    });
   }
 }
