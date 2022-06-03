@@ -1,9 +1,8 @@
-# Welcome to your CDK TypeScript project
+# Hybrid DNS between AWS and Simulated On-Premises
 
-You should explore the contents of this project. It demonstrates a CDK app with an instance of a stack (`HybridDnsCantrillLabStack`)
-which contains an Amazon SQS queue that is subscribed to an Amazon SNS topic.
+The original [project](https://github.com/acantril/learn-cantrill-io-labs/tree/master/aws-hybrid-dns) from https://learn.cantrill.io
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+This is just a rewrite of the Cloudformation using CDK 2.X.
 
 ## Useful commands
 
